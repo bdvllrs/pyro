@@ -1,3 +1,4 @@
+from collections.abc import Generator
 from pathlib import Path
 
 from pyro.module import Module
@@ -54,3 +55,8 @@ class Project:
 
     def save_module(self, name: str, module: Module) -> None:
         self.save_module_content(name, module.get_content())
+
+    def walk_modules(self) -> Generator[tuple[str, Module], None, None]:
+        for path in self.root.rglob("*.py"):
+            name = ".".join(path.relative_to(self.root).with_suffix("").parts)
+            yield name, self.get_module(name)
