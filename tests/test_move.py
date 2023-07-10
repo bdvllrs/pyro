@@ -123,7 +123,7 @@ def test_move_long_term_other_dependencies_multiple_import_from_end():
     )
     assert (
         project.get_module_content("mod2")
-        == "def test():\n    return 1\ny = 0"
+        == "y = 0\ndef test():\n    return 1"
     )
     assert (
         project.get_module_content("mod3")
@@ -136,10 +136,13 @@ def test_move_long_term_other_dependencies_absolute():
 
     project.create_module("mod1", "def test():\n    return 1")
     project.create_module("mod2", "")
-    project.create_module("mod3", "import mod1\ny = mod1.test()")
+    project.create_module("mod3", "import mod1\n\ny = mod1.test()")
 
     move(project, "mod1", 1, 5, "mod2")
 
     assert project.get_module_content("mod1") == ""
     assert project.get_module_content("mod2") == "def test():\n    return 1"
-    assert project.get_module_content("mod3") == "import mod2\nmod2.test()"
+    assert (
+        project.get_module_content("mod3")
+        == "from mod2 import test\n\ny = test()"
+    )
