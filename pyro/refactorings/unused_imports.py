@@ -6,7 +6,7 @@ from libcst.metadata import Assignment, Scope
 
 
 def _find_unused_imports(
-    scopes,
+    scopes: Iterable[Scope | None],
 ) -> dict[cst.Import | cst.ImportFrom, set[str]]:
     """
     Inspired from libCST scope analysis tutorial.
@@ -15,6 +15,8 @@ def _find_unused_imports(
         set
     )
     for scope in scopes:
+        if scope is None:
+            continue
         for assignment in scope.assignments:
             node = assignment.node  # type: ignore
             if isinstance(assignment, Assignment) and isinstance(
@@ -30,7 +32,7 @@ class RemoveUnusedImports(cst.CSTTransformer):
     Inspired from libCST scope analysis tutorial.
     """
 
-    def __init__(self, scopes: Iterable[Scope]) -> None:
+    def __init__(self, scopes: Iterable[Scope | None]) -> None:
         super().__init__()
 
         self._scopes = scopes
@@ -41,7 +43,7 @@ class RemoveUnusedImports(cst.CSTTransformer):
         original_node: cst.Import | cst.ImportFrom,
         updated_node: cst.Import | cst.ImportFrom,
     ) -> cst.Import | cst.ImportFrom | cst.RemovalSentinel:
-        if original_node not in self.unused_imports:
+        if original_node not in self.unused_imports.keys():
             return updated_node
         names_to_keep = []
         names = updated_node.names

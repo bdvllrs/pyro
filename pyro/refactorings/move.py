@@ -3,9 +3,10 @@ from typing import Union
 
 import libcst as cst
 import libcst.matchers as m
-from libcst.metadata import CodeRange, PositionProvider
+from libcst.metadata import CodeRange, PositionProvider, ScopeProvider
 
 from pyro.project import Project
+from pyro.refactorings.unused_imports import RemoveUnusedImports
 
 
 class RemoveSymbolAtLocation(cst.CSTTransformer):
@@ -90,21 +91,59 @@ class ReplaceImportIfNeeded(cst.CSTTransformer):
 
         self._add_import: bool = False
         self._import_alread_added: bool = False
+        self._symbol_schemas: list[m.BaseMatcherNode] = []
 
     def visit_ImportFrom(self, node: cst.ImportFrom) -> bool | None:
         # Do not visit inside import so that the visit_Name only
         # concerns using the symbol
         return False
 
-    def visit_Import(self, node: cst.From) -> bool | None:
+    def _imports_package_or_module(
+        self, node: cst.Name | cst.Attribute, module: list[str]
+    ) -> tuple[Union[m.Name, m.Attribute], list[str]]:
+        name = m.Name(value=module[0])
+        if m.matches(node, name):
+            return name, [module[0]]
+
+        assert isinstance(node, cst.Attribute)
+
+        sub_match, sub_module = self._imports_package_or_module(
+            cst.ensure_type(node, cst.Attribute).value, module  # type: ignore
+        )
+        rest_module = module[len(sub_module) :]
+        new_attr = m.Attribute(
+            value=sub_match, attr=m.Name(value=rest_module[0])
+        )
+        return new_attr, sub_module + [rest_module[0]]
+
+    def visit_Import(self, node: cst.Import) -> bool | None:
         # Do not visit inside import so that the visit_Name only
         # concerns using the symbol
+        for name in node.names:
+            match_attr, _ = self._imports_package_or_module(
+                name.name, self._old_module_name
+            )
+            if m.matches(name.name, match_attr):
+                self._symbol_schemas.append(
+                    m.Attribute(
+                        value=match_attr,
+                        attr=m.Name(value=self._old_module_name[-1]),
+                    )
+                )
         return False
 
     def visit_Name(self, node: cst.Name) -> bool | None:
         if node.value == self._new_module_name[-1]:
             self._add_import = True
             return False
+
+    def leave_Attribute(
+        self, original_node: cst.Attribute, updated_node: cst.Attribute
+    ) -> cst.Attribute | cst.Name:
+        for schema in self._symbol_schemas:
+            if m.matches(original_node, schema):
+                return cst.Name(value=self._new_module_name[-1])
+        return updated_node
 
     def _get_import_module(
         self, module: Sequence[str]
@@ -265,4 +304,8 @@ def move(
         module.visit(
             ReplaceImportIfNeeded(old_symbol_location, new_symbol_location)
         )
+
+        scopes = set(module.resolve_metadata(ScopeProvider).values())
+        module.visit(RemoveUnusedImports(scopes))
+
         project.save_module(module_name, module)
