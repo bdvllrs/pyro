@@ -54,9 +54,6 @@ class RemoveSymbolAtLocation(cst.CSTTransformer):
         )
         return correct_line and corrent_column
 
-    def visit_Module(self, node: cst.Module) -> bool | None:
-        return super().visit_Module(node)
-
     def visit_symbol(self, node: SymbolT) -> bool | None:
         code_range = self.get_metadata(PositionProvider, node, None)
         if self._is_in_block(code_range):
@@ -156,11 +153,45 @@ class InsertSymbolEnd(cst.CSTTransformer):
     def visit_Module(self, _) -> bool | None:
         return False
 
+    def _get_leading_lines(
+        self, previous_node: cst.CSTNode | None
+    ) -> list[cst.EmptyLine]:
+        leading_lines = list(self._symbol.leading_lines)
+        empty_lines = 0
+        for line in leading_lines:
+            if line.comment is None:
+                empty_lines += 1
+            else:
+                break
+
+        number_leading_lines = 0
+        if previous_node is not None:
+            number_leading_lines = 2
+
+        if empty_lines == number_leading_lines:
+            return leading_lines
+
+        if empty_lines > number_leading_lines:
+            for _ in range(empty_lines):
+                leading_lines.pop(0)
+            return leading_lines
+
+        for _ in range(number_leading_lines - empty_lines):
+            leading_lines.append(
+                cst.EmptyLine(indent=True, newline=cst.Newline(value=None))
+            )
+        return leading_lines
+
     def leave_Module(
         self, _, updated_node: cst.Module
     ) -> cst.Module | cst.RemovalSentinel:
-        new_body = list(updated_node.body[:])
-        new_body.append(self._symbol)
+        new_body = list(updated_node.body)
+        last_node = new_body[-1] if len(new_body) else None
+        new_body.append(
+            self._symbol.with_changes(
+                leading_lines=self._get_leading_lines(last_node)
+            )
+        )
 
         return cst.ensure_type(
             updated_node.with_changes(body=new_body),

@@ -16,6 +16,21 @@ def test_move():
     assert project.get_module_content("mod2") == "def test():\n    return 1"
 
 
+def test_move_after_existing():
+    project = get_temp_project()
+
+    project.create_module("mod1", "def test():\n    return 1\n\nx = 2")
+    project.create_module("mod2", "def fn():\n    return 1")
+
+    move(project, "mod1", 1, 5, "mod2")
+
+    assert project.get_module_content("mod1") == "\nx = 2"
+    assert (
+        project.get_module_content("mod2")
+        == "def fn():\n    return 1\n\ndef test():\n    return 1"
+    )
+
+
 def test_move_dependency():
     project = get_temp_project()
 
