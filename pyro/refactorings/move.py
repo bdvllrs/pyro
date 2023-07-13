@@ -376,7 +376,7 @@ class ReplaceImportIfNeeded(cst.CSTTransformer):
 def symbol_dependencies(
     module: Module,
     line_number: int,
-    column_oofset: int,
+    column_offset: int,
 ):
     pass
 
