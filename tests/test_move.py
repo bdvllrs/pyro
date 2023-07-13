@@ -1,3 +1,4 @@
+import pytest
 from utils import get_temp_project
 
 from pyro.refactorings import move
@@ -62,7 +63,7 @@ def test_move_long_term_dependency_2():
     )
 
 
-def test_move_long_term_other_dependencies_import_from():
+def test_move_other_dependencies_import_from():
     project = get_temp_project()
 
     project.create_module("mod1", "def test():\n    return 1\nx = test()")
@@ -82,7 +83,7 @@ def test_move_long_term_other_dependencies_import_from():
     )
 
 
-def test_move_long_term_other_dependencies_multiple_import_from_start():
+def test_move_other_dependencies_multiple_import_from_start():
     project = get_temp_project()
 
     project.create_module(
@@ -106,7 +107,7 @@ def test_move_long_term_other_dependencies_multiple_import_from_start():
     )
 
 
-def test_move_long_term_other_dependencies_multiple_import_from_end():
+def test_move_other_dependencies_multiple_import_from_end():
     project = get_temp_project()
 
     project.create_module("mod1", "def test():\n    return 1\nx = test()")
@@ -131,7 +132,7 @@ def test_move_long_term_other_dependencies_multiple_import_from_end():
     )
 
 
-def test_move_long_term_other_dependencies_absolute():
+def test_move_other_dependencies_absolute():
     project = get_temp_project()
 
     project.create_module("mod1", "def test():\n    return 1")
@@ -146,3 +147,71 @@ def test_move_long_term_other_dependencies_absolute():
         project.get_module_content("mod3")
         == "from mod2 import test\n\ny = test()"
     )
+
+
+def test_move_long_term_other_dependencies_absolute():
+    project = get_temp_project()
+
+    project.create_module("pkg.mod1", "def test():\n    return 1")
+    project.create_module("mod2", "")
+    project.create_module("mod3", "import pkg\n\ny = pkg.mod1.test()")
+
+    move(project, "pkg.mod1", 1, 5, "mod2")
+
+    assert project.get_module_content("pkg.mod1") == ""
+    assert project.get_module_content("mod2") == "def test():\n    return 1"
+    assert (
+        project.get_module_content("mod3")
+        == "from mod2 import test\n\ny = test()"
+    )
+
+
+def test_move_module():
+    project = get_temp_project()
+
+    project.create_module(
+        "mod1", "class test:\n    def test(self):\n       return 1"
+    )
+    project.create_module("mod2", "")
+
+    move(project, "mod1", 1, 6, "mod2")
+
+    assert project.get_module_content("mod1") == ""
+    assert (
+        project.get_module_content("mod2")
+        == "class test:\n    def test(self):\n       return 1"
+    )
+
+
+def test_move_variable():
+    project = get_temp_project()
+
+    project.create_module("mod1", "test = 1")
+    project.create_module("mod2", "")
+
+    move(project, "mod1", 1, 1, "mod2")
+
+    assert project.get_module_content("mod1") == ""
+    assert project.get_module_content("mod2") == "test = 1"
+
+
+def test_move_variable_fail_multiple_assignments():
+    project = get_temp_project()
+
+    project.create_module("mod1", "test = other_var = 1")
+    project.create_module("mod2", "")
+
+    with pytest.raises(ValueError):
+        move(project, "mod1", 1, 1, "mod2")
+
+
+def test_move_variable_with_annotation():
+    project = get_temp_project()
+
+    project.create_module("mod1", "test: int = 1")
+    project.create_module("mod2", "")
+
+    move(project, "mod1", 1, 1, "mod2")
+
+    assert project.get_module_content("mod1") == ""
+    assert project.get_module_content("mod2") == "test: int = 1"

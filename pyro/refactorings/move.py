@@ -5,8 +5,25 @@ import libcst as cst
 import libcst.matchers as m
 from libcst.metadata import CodeRange, PositionProvider, ScopeProvider
 
+from pyro.module import Module
 from pyro.project import Project
 from pyro.refactorings.unused_imports import RemoveUnusedImports
+
+
+class FindSymbolDependencies(cst.CSTVisitor):
+    METADATA_DEPENDENCIES = (PositionProvider,)
+
+    def __init__(
+        self,
+        current_line: int,
+        current_column: int,
+    ) -> None:
+        super().__init__()
+        self._current_line = current_line
+        self._current_column = current_column
+
+
+SymbolT = cst.FunctionDef | cst.ClassDef
 
 
 class RemoveSymbolAtLocation(cst.CSTTransformer):
@@ -20,8 +37,8 @@ class RemoveSymbolAtLocation(cst.CSTTransformer):
         super().__init__()
         self._current_line = current_line
         self._current_column = current_column
-        self.removed_symbol: cst.FunctionDef | None = None
-        self.symbol_name: str | None = None
+        self.removed_symbol: SymbolT | cst.SimpleStatementLine | None = None
+        self.symbol_names: list[str] | None = None
 
     def _is_in_block(self, code_range: CodeRange | None):
         if code_range is None:
@@ -40,23 +57,99 @@ class RemoveSymbolAtLocation(cst.CSTTransformer):
     def visit_Module(self, node: cst.Module) -> bool | None:
         return super().visit_Module(node)
 
-    def visit_FunctionDef(self, node: cst.FunctionDef) -> bool | None:
+    def visit_symbol(self, node: SymbolT) -> bool | None:
         code_range = self.get_metadata(PositionProvider, node, None)
         if self._is_in_block(code_range):
             self.removed_symbol = node
-            self.symbol_name = node.name.value
+            self.symbol_names = [node.name.value]
             return False
 
-    def leave_FunctionDef(
-        self, original_node: cst.FunctionDef, updated_node: cst.FunctionDef
-    ) -> cst.FunctionDef | cst.RemovalSentinel:
+    def visit_FunctionDef(self, node: cst.FunctionDef) -> bool | None:
+        return self.visit_symbol(node)
+
+    def visit_ClassDef(self, node: cst.ClassDef) -> bool | None:
+        return self.visit_symbol(node)
+
+    def visit_SimpleStatementLine(
+        self, node: cst.SimpleStatementLine
+    ) -> bool | None:
+        code_range = self.get_metadata(PositionProvider, node, None)
+        if self._is_in_block(code_range):
+            if m.matches(
+                node,
+                m.SimpleStatementLine(
+                    body=[m.Assign(targets=[m.AssignTarget(target=m.Name())])]
+                ),
+            ):
+                symbol_name = cst.ensure_type(
+                    cst.ensure_type(node.body[0], cst.Assign)
+                    .targets[0]
+                    .target,
+                    cst.Name,
+                ).value
+            elif m.matches(
+                node,
+                m.SimpleStatementLine(body=[m.AnnAssign(target=m.Name())]),
+            ):
+                symbol_name = cst.ensure_type(
+                    cst.ensure_type(node.body[0], cst.AnnAssign).target,
+                    cst.Name,
+                ).value
+            else:
+                raise ValueError(
+                    "Cannot extract assignment of multiple variables yet."
+                )
+            self.removed_symbol = node
+            self.symbol_names = [symbol_name]
+            return False
+
+    def leave_symbol(
+        self,
+        original_node: cst.BaseCompoundStatement | cst.SimpleStatementLine,
+        updated_node: cst.BaseCompoundStatement | cst.SimpleStatementLine,
+    ) -> (
+        cst.BaseCompoundStatement
+        | cst.SimpleStatementLine
+        | cst.RemovalSentinel
+    ):
         if self.removed_symbol is original_node:
             return cst.RemovalSentinel.REMOVE
         return updated_node
 
+    def leave_FunctionDef(
+        self, original_node: cst.FunctionDef, updated_node: cst.FunctionDef
+    ) -> (
+        cst.BaseCompoundStatement
+        | cst.SimpleStatementLine
+        | cst.RemovalSentinel
+    ):
+        return self.leave_symbol(original_node, updated_node)
+
+    def leave_ClassDef(
+        self, original_node: cst.ClassDef, updated_node: cst.ClassDef
+    ) -> (
+        cst.BaseCompoundStatement
+        | cst.SimpleStatementLine
+        | cst.RemovalSentinel
+    ):
+        return self.leave_symbol(original_node, updated_node)
+
+    def leave_SimpleStatementLine(
+        self,
+        original_node: cst.SimpleStatementLine,
+        updated_node: cst.SimpleStatementLine,
+    ) -> (
+        cst.BaseCompoundStatement
+        | cst.SimpleStatementLine
+        | cst.RemovalSentinel
+    ):
+        return self.leave_symbol(original_node, updated_node)
+
 
 class InsertSymbolEnd(cst.CSTTransformer):
-    def __init__(self, symbol: cst.BaseCompoundStatement) -> None:
+    def __init__(
+        self, symbol: cst.BaseCompoundStatement | cst.SimpleStatementLine
+    ) -> None:
         super().__init__()
         self._symbol = symbol
 
@@ -75,19 +168,32 @@ class InsertSymbolEnd(cst.CSTTransformer):
         )
 
 
+def _get_symbol_access_matcher(
+    module: list[str],
+) -> Union[m.Name, m.Attribute]:
+    if len(module) == 1:
+        return m.Name(value=module[0])
+    return m.Attribute(
+        value=_get_symbol_access_matcher(module[:-1]),
+        attr=m.Name(value=module[-1]),
+    )
+
+
 class ReplaceImportIfNeeded(cst.CSTTransformer):
     def __init__(
         self,
-        old_module_name: str,
-        new_module_name: str,
+        old_package_name: str,
+        new_package_name: str,
+        symbol_names: Sequence[str],
     ) -> None:
         super().__init__()
 
-        self._new_module_name = new_module_name.split(".")
-        self._new_package_name = ".".join(self._new_module_name[:-1])
+        self._new_module_name = new_package_name.split(".")
+        self._new_package_name = new_package_name
 
-        self._old_module_name = old_module_name.split(".")
-        self._old_package_name = ".".join(self._old_module_name[:-1])
+        self._old_module_name = old_package_name.split(".")
+        self._old_package_name = old_package_name
+        self._symbol_names = symbol_names
 
         self._add_import: bool = False
         self._import_alread_added: bool = False
@@ -117,23 +223,22 @@ class ReplaceImportIfNeeded(cst.CSTTransformer):
         return new_attr, sub_module + [rest_module[0]]
 
     def visit_Import(self, node: cst.Import) -> bool | None:
-        # Do not visit inside import so that the visit_Name only
-        # concerns using the symbol
         for name in node.names:
             match_attr, _ = self._imports_package_or_module(
-                name.name, self._old_module_name
+                name.name, self._old_module_name + [self._symbol_names[0]]
             )
             if m.matches(name.name, match_attr):
                 self._symbol_schemas.append(
-                    m.Attribute(
-                        value=match_attr,
-                        attr=m.Name(value=self._old_module_name[-1]),
+                    _get_symbol_access_matcher(
+                        self._old_module_name + [self._symbol_names[0]]
                     )
                 )
+        # Do not visit inside import so that the visit_Name only
+        # concerns using the symbol
         return False
 
     def visit_Name(self, node: cst.Name) -> bool | None:
-        if node.value == self._new_module_name[-1]:
+        if node.value in self._symbol_names:
             self._add_import = True
             return False
 
@@ -142,7 +247,7 @@ class ReplaceImportIfNeeded(cst.CSTTransformer):
     ) -> cst.Attribute | cst.Name:
         for schema in self._symbol_schemas:
             if m.matches(original_node, schema):
-                return cst.Name(value=self._new_module_name[-1])
+                return cst.Name(value=self._symbol_names[0])
         return updated_node
 
     def _get_import_module(
@@ -166,7 +271,7 @@ class ReplaceImportIfNeeded(cst.CSTTransformer):
                 name,
                 m.ImportAlias(
                     name=m.Name(
-                        value=self._old_module_name[-1],
+                        value=self._symbol_names[0],
                     )
                 ),
             ):
@@ -179,12 +284,10 @@ class ReplaceImportIfNeeded(cst.CSTTransformer):
         return m.matches(
             node,
             m.ImportFrom(
-                module=self._get_import_module(self._old_module_name[:-1]),
+                module=self._get_import_module(self._old_module_name),
                 names=[
                     m.ZeroOrMore(),
-                    m.ImportAlias(
-                        name=m.Name(value=self._old_module_name[-1])
-                    ),
+                    m.ImportAlias(name=m.Name(value=self._symbol_names[0])),
                     m.ZeroOrMore(),
                 ],
             ),
@@ -207,7 +310,7 @@ class ReplaceImportIfNeeded(cst.CSTTransformer):
         if m.matches(
             updated_node,
             m.ImportFrom(
-                module=self._get_import_module(self._new_module_name[:-1]),
+                module=self._get_import_module(self._new_module_name),
             ),
         ):
             names = cst.ensure_type(updated_node, cst.ImportFrom).names
@@ -222,7 +325,7 @@ class ReplaceImportIfNeeded(cst.CSTTransformer):
                 )
             new_names.append(
                 cst.ImportAlias(
-                    name=cst.Name(value=self._new_module_name[-1]),
+                    name=cst.Name(value=self._symbol_names[0]),
                     comma=cst.MaybeSentinel.DEFAULT,
                 )
             )
@@ -257,7 +360,7 @@ class ReplaceImportIfNeeded(cst.CSTTransformer):
             import_statements = updated_node.body[:end_imports_index]
             rest_body = updated_node.body[end_imports_index:]
             new_import = cst.parse_statement(
-                f"from {self._new_package_name} import {self._new_module_name[-1]}",
+                f"from {self._new_package_name} import {self._symbol_names[0]}",
                 config=original_node.config_for_parsing,
             )
             new_body = (*import_statements, new_import, *rest_body)
@@ -268,6 +371,14 @@ class ReplaceImportIfNeeded(cst.CSTTransformer):
                 cst.Module,
             )
         return updated_node
+
+
+def symbol_dependencies(
+    module: Module,
+    line_number: int,
+    column_oofset: int,
+):
+    pass
 
 
 def move(
@@ -284,15 +395,17 @@ def move(
     module_start.visit_with_metadata(symbol_remover)
     if (
         symbol_remover.removed_symbol is None
-        or symbol_remover.symbol_name is None
+        or symbol_remover.symbol_names is None
     ):
         raise Exception("No symbol found at location")
 
-    old_symbol_location = f"{module_name_start}.{symbol_remover.symbol_name}"
-    new_symbol_location = f"{module_name_end}.{symbol_remover.symbol_name}"
     module_end.visit(InsertSymbolEnd(symbol_remover.removed_symbol))
     module_start.visit(
-        ReplaceImportIfNeeded(old_symbol_location, new_symbol_location)
+        ReplaceImportIfNeeded(
+            module_name_start,
+            module_name_end,
+            symbol_remover.symbol_names,
+        )
     )
 
     project.save_module(module_name_start, module_start)
@@ -302,7 +415,9 @@ def move(
             continue
 
         module.visit(
-            ReplaceImportIfNeeded(old_symbol_location, new_symbol_location)
+            ReplaceImportIfNeeded(
+                module_name_start, module_name_end, symbol_remover.symbol_names
+            )
         )
 
         scopes = set(module.resolve_metadata(ScopeProvider).values())
