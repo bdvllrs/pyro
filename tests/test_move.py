@@ -78,6 +78,46 @@ def test_move_long_term_dependency_2():
     )
 
 
+def test_move_other_unrelated_file():
+    project = get_temp_project()
+
+    project.create_module("mod1", "def test():\n    return 1\nx = test()")
+    project.create_module("mod2", "")
+    project.create_module("mod3", "from mod4 import x\n\nprint(x)")
+    project.create_module("mod4", "x = 2")
+
+    move(project, "mod1", 1, 5, "mod2")
+
+    assert (
+        project.get_module_content("mod1")
+        == "from mod2 import test\nx = test()"
+    )
+    assert project.get_module_content("mod2") == "def test():\n    return 1"
+    assert (
+        project.get_module_content("mod3") == "from mod4 import x\n\nprint(x)"
+    )
+    assert project.get_module_content("mod4") == "x = 2"
+
+
+def test_move_other_unrelated_file_absolute_import():
+    project = get_temp_project()
+
+    project.create_module("mod1", "def test():\n    return 1\nx = test()")
+    project.create_module("mod2", "")
+    project.create_module("mod3", "import math\n\nprint(math.pi)")
+
+    move(project, "mod1", 1, 5, "mod2")
+
+    assert (
+        project.get_module_content("mod1")
+        == "from mod2 import test\nx = test()"
+    )
+    assert project.get_module_content("mod2") == "def test():\n    return 1"
+    assert (
+        project.get_module_content("mod3") == "import math\n\nprint(math.pi)"
+    )
+
+
 def test_move_other_dependencies_import_from():
     project = get_temp_project()
 

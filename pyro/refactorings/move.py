@@ -236,17 +236,24 @@ class ReplaceImportIfNeeded(cst.CSTTransformer):
         return False
 
     def _imports_package_or_module(
-        self, node: cst.Name | cst.Attribute, module: list[str]
-    ) -> tuple[Union[m.Name, m.Attribute], list[str]]:
+        self, node: cst.BaseExpression, module: list[str]
+    ) -> tuple[Union[m.Name, m.Attribute, None], list[str] | None]:
         name = m.Name(value=module[0])
         if m.matches(node, name):
             return name, [module[0]]
 
-        assert isinstance(node, cst.Attribute)
+        if isinstance(node, cst.Name):
+            return None, None
+
+        if not isinstance(node, cst.Attribute):
+            raise ValueError()
 
         sub_match, sub_module = self._imports_package_or_module(
-            cst.ensure_type(node, cst.Attribute).value, module  # type: ignore
+            cst.ensure_type(node, cst.Attribute).value, module
         )
+        if sub_match is None or sub_module is None:
+            return None, None
+
         rest_module = module[len(sub_module) :]
         new_attr = m.Attribute(
             value=sub_match, attr=m.Name(value=rest_module[0])
@@ -258,6 +265,9 @@ class ReplaceImportIfNeeded(cst.CSTTransformer):
             match_attr, _ = self._imports_package_or_module(
                 name.name, self._old_module_name + [self._symbol_names[0]]
             )
+            if match_attr is None:
+                return False
+
             if m.matches(name.name, match_attr):
                 self._symbol_schemas.append(
                     _get_symbol_access_matcher(
@@ -439,8 +449,11 @@ def move(
         )
     )
 
-    project.save_module(module_name_start, module_start)
-    project.save_module(module_name_end, module_end)
+    modules_to_save: list[tuple[str, Module]] = [
+        (module_name_start, module_start),
+        (module_name_end, module_end),
+    ]
+
     for module_name, module in project.walk_modules():
         if module_name == module_name_start or module_name == module_name_end:
             continue
@@ -454,4 +467,7 @@ def move(
         scopes = set(module.resolve_metadata(ScopeProvider).values())
         module.visit(RemoveUnusedImports(scopes))
 
-        project.save_module(module_name, module)
+        modules_to_save.append((module_name, module))
+
+    for module_name, mod in modules_to_save:
+        project.save_module(module_name, mod)
