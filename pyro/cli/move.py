@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import click
@@ -35,5 +36,10 @@ def move_command(
     colno: int,
     module_end: str,
 ) -> None:
-    project = Project(root_path)
-    move(project, module_start, lineno, colno, module_end)
+    try:
+        project = Project(root_path)
+        outputs = move(project, module_start, lineno, colno, module_end)
+    except Exception as e:
+        print(json.dumps({"success": False, "errorMsg": str(e)}))
+        return
+    print(json.dumps(outputs))

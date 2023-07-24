@@ -179,7 +179,7 @@ def test_move_other_dependencies_multiple_import_from_end():
     )
     assert (
         project.get_module_content("mod2")
-        == "y = 0\ndef test():\n    return 1"
+        == "y = 0\n\ndef test():\n    return 1"
     )
     assert (
         project.get_module_content("mod3")

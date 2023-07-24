@@ -19,17 +19,17 @@ class Module:
     def get_content(self) -> str:
         return self.tree.code
 
-    def _update_tree(self, new_tree: cst.Module):
+    def update(self, new_tree: cst.Module):
         self.history.append(self.tree)
         self.tree = new_tree
 
     def visit(self, visitor: cst.CSTVisitorT) -> cst.Module:
-        self._update_tree(self.tree.visit(visitor))
+        self.update(self.tree.visit(visitor))
         return self.tree
 
     def visit_with_metadata(self, visitor: cst.CSTVisitorT) -> cst.Module:
         wrapper = MetadataWrapper(self.tree)
-        self._update_tree(wrapper.visit(visitor))
+        self.update(wrapper.visit(visitor))
         return self.tree
 
     def resolve_metadata(
