@@ -363,6 +363,8 @@ class ReplaceImportIfNeeded(cst.CSTTransformer):
         self._import_alread_added: bool = False
         self._symbol_schemas: list[m.BaseMatcherNode] = []
 
+        self.did_replace: bool = False
+
     def visit_ImportFrom(self, node: cst.ImportFrom) -> bool | None:
         # Do not visit inside import so that the visit_Name only
         # concerns using the symbol
@@ -480,7 +482,9 @@ class ReplaceImportIfNeeded(cst.CSTTransformer):
                 return updated_node
 
             if not len(names):
+                self.did_replace = True
                 return cst.RemoveFromParent()
+            self.did_replace = True
             return updated_node.with_changes(names=names)
         if m.matches(
             updated_node,
@@ -505,6 +509,7 @@ class ReplaceImportIfNeeded(cst.CSTTransformer):
                 )
             )
             self._import_alread_added = True
+            self.did_replace = True
             return updated_node.with_changes(names=new_names)
         return updated_node
 
@@ -539,6 +544,7 @@ class ReplaceImportIfNeeded(cst.CSTTransformer):
                 config=original_node.config_for_parsing,
             )
             new_body = (*import_statements, new_import, *rest_body)
+            self.did_replace = True
             return cst.ensure_type(
                 updated_node.with_changes(
                     body=new_body,
@@ -603,20 +609,20 @@ def move(
         if module_name == module_name_start or module_name == module_name_end:
             continue
 
-        module.visit(
-            ReplaceImportIfNeeded(
-                module_name_start,
-                module_name_end,
-                symbol_remover.symbol_name,
-                symbol_remover.symbol_requirements,
-            )
+        replacer = ReplaceImportIfNeeded(
+            module_name_start,
+            module_name_end,
+            symbol_remover.symbol_name,
+            symbol_remover.symbol_requirements,
         )
+        module.visit(replacer)
 
-        wrapper = cst.MetadataWrapper(module.tree)
-        scopes = set(wrapper.resolve(ScopeProvider).values())
-        module.visit_with_metadata(wrapper, RemoveUnusedImports(scopes))
+        if replacer.did_replace:
+            wrapper = cst.MetadataWrapper(module.tree)
+            scopes = set(wrapper.resolve(ScopeProvider).values())
+            module.visit_with_metadata(wrapper, RemoveUnusedImports(scopes))
 
-        modules_to_save.append((module_name, module))
+            modules_to_save.append((module_name, module))
 
     for module_name, mod in modules_to_save:
         project.save_module(module_name, mod)

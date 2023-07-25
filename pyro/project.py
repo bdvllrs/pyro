@@ -5,7 +5,7 @@ from pathlib import Path
 from pyro.module import Module
 
 
-def reformat(location: Path) -> None:
+def reformat_file(location: Path) -> None:
     source_file = str(location.resolve())
     subprocess.run(["isort", "--profile", "black", source_file])
     subprocess.run(["black", "--fast", "-q", source_file])
@@ -51,18 +51,22 @@ class Project:
         with open(location, "r") as f:
             return f.read()
 
-    def save_module_content(self, name: str, content: str) -> None:
+    def save_module_content(
+        self, name: str, content: str, reformat: bool = False
+    ) -> None:
         location = self.get_module_path(name)
         with open(location, "w") as f:
             f.write(content)
-        reformat(location)
+
+        if reformat:
+            reformat_file(location)
 
     def get_module(self, name: str) -> Module:
         content = self.get_module_content(name)
         return Module.from_content(content)
 
     def save_module(self, name: str, module: Module) -> None:
-        self.save_module_content(name, module.get_content())
+        self.save_module_content(name, module.get_content(), reformat=True)
 
     def walk_modules(self) -> Generator[tuple[str, Module], None, None]:
         for path in self.root.rglob("*.py"):
