@@ -1,5 +1,6 @@
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
+from typing import cast
 
 import libcst as cst
 import libcst.matchers as m
@@ -72,13 +73,14 @@ class RemoveUnusedImports(cst.CSTTransformer):
             return updated_node
         names_to_keep = []
 
-        if isinstance(updated_node.names, cst.ImportStar):
+        names = updated_node.names
+        if isinstance(names, cst.ImportStar):
             return updated_node
 
-        for name in updated_node.names:
+        for name in cast(Sequence[cst.ImportAlias], names):
             asname = name.asname
             if asname is not None:
-                name_value = asname.name.value
+                name_value = cst.ensure_type(asname.name, cst.Name).value
             else:
                 name_value = name.name.value
             if name_value not in self.unused_imports[original_node]:

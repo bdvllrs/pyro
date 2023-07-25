@@ -1,5 +1,5 @@
 from collections.abc import Iterable, Mapping, Sequence
-from typing import Any, Union
+from typing import Any, Union, cast
 
 import libcst as cst
 import libcst.matchers as m
@@ -152,6 +152,7 @@ class RemoveSymbolAtLocation(cst.CSTTransformer):
                         self._node_requirements(scope)
                     )
             return False
+        return True
 
     def visit_FunctionDef(self, node: cst.FunctionDef) -> bool | None:
         return self.visit_symbol(node)
@@ -192,9 +193,7 @@ class RemoveSymbolAtLocation(cst.CSTTransformer):
             self.symbol_name = symbol_name
         return True
 
-    def look_for_inline_referent(
-        self, node: cst.Attribute | cst.Name
-    ) -> bool | None:
+    def look_for_inline_referent(self, node: cst.Attribute | cst.Name) -> bool:
         if self._code_range is None:
             return True
 
@@ -204,6 +203,7 @@ class RemoveSymbolAtLocation(cst.CSTTransformer):
             self.symbol_requirements.update(
                 self._node_requirements(scope, node)
             )
+        return False
 
     def visit_Attribute(self, node: cst.Attribute) -> bool | None:
         return self.look_for_inline_referent(node)
@@ -315,9 +315,7 @@ class InsertSymbolEnd(cst.CSTTransformer):
             )
         return leading_lines
 
-    def leave_Module(
-        self, _, updated_node: cst.Module
-    ) -> cst.Module | cst.RemovalSentinel:
+    def leave_Module(self, _, updated_node: cst.Module) -> cst.Module:
         new_body = list(updated_node.body)
         last_node = new_body[-1] if len(new_body) else None
         new_body.append(
@@ -417,6 +415,7 @@ class ReplaceImportIfNeeded(cst.CSTTransformer):
         if node.value == self._symbol_name:
             self._add_import = True
             return False
+        return True
 
     def leave_Attribute(
         self, original_node: cst.Attribute, updated_node: cst.Attribute
@@ -489,13 +488,13 @@ class ReplaceImportIfNeeded(cst.CSTTransformer):
                 module=self._get_import_module(self._new_module_name),
             ),
         ):
-            names = cst.ensure_type(updated_node, cst.ImportFrom).names
+            import_names = cst.ensure_type(updated_node, cst.ImportFrom).names
 
-            if isinstance(names, cst.ImportStar):
+            if isinstance(import_names, cst.ImportStar):
                 return updated_node
 
             new_names: list[cst.ImportAlias] = []
-            for name in names:
+            for name in cast(Sequence[cst.ImportAlias], import_names):
                 new_names.append(
                     name.with_changes(comma=cst.MaybeSentinel.DEFAULT)
                 )
@@ -517,8 +516,8 @@ class ReplaceImportIfNeeded(cst.CSTTransformer):
                     body=[
                         m.AtLeastN(
                             n=1,
-                            matcher=(m.Import | m.ImportFrom),
-                        )  # type: ignore
+                            matcher=(m.Import() | m.ImportFrom()),
+                        ),
                     ]
                 )
                 | m.Import
