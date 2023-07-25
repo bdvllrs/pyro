@@ -203,7 +203,7 @@ class RemoveSymbolAtLocation(cst.CSTTransformer):
             self.symbol_requirements.update(
                 self._node_requirements(scope, node)
             )
-        return False
+        return True
 
     def visit_Attribute(self, node: cst.Attribute) -> bool | None:
         return self.look_for_inline_referent(node)
