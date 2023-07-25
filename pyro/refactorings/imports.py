@@ -82,7 +82,7 @@ class RemoveUnusedImports(cst.CSTTransformer):
             if asname is not None:
                 name_value = cst.ensure_type(asname.name, cst.Name).value
             else:
-                name_value = name.name.value
+                name_value = cst.ensure_type(name.name, cst.Name).value
             if name_value not in self.unused_imports[original_node]:
                 names_to_keep.append(
                     name.with_changes(comma=cst.MaybeSentinel.DEFAULT)
