@@ -1,7 +1,14 @@
+import subprocess
 from collections.abc import Generator
 from pathlib import Path
 
 from pyro.module import Module
+
+
+def reformat(location: Path) -> None:
+    source_file = str(location.resolve())
+    subprocess.run(["isort", "--profile", "black", source_file])
+    subprocess.run(["black", "--fast", "-q", source_file])
 
 
 class Project:
@@ -48,6 +55,7 @@ class Project:
         location = self.get_module_path(name)
         with open(location, "w") as f:
             f.write(content)
+        reformat(location)
 
     def get_module(self, name: str) -> Module:
         content = self.get_module_content(name)

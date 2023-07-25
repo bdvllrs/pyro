@@ -1,4 +1,3 @@
-from collections.abc import Mapping
 from typing import TypeVar
 
 import libcst as cst
@@ -27,13 +26,8 @@ class Module:
         self.update(self.tree.visit(visitor))
         return self.tree
 
-    def visit_with_metadata(self, visitor: cst.CSTVisitorT) -> cst.Module:
-        wrapper = MetadataWrapper(self.tree)
+    def visit_with_metadata(
+        self, wrapper: MetadataWrapper, visitor: cst.CSTVisitorT
+    ) -> cst.Module:
         self.update(wrapper.visit(visitor))
         return self.tree
-
-    def resolve_metadata(
-        self, provider: type[cst.BaseMetadataProvider[_T]]
-    ) -> Mapping[cst.CSTNode, _T]:
-        wrapper = MetadataWrapper(self.tree)
-        return wrapper.resolve(provider)

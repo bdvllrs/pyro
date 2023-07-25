@@ -47,22 +47,22 @@ def test_project_add_package_recursive():
 def test_project_add_module():
     project = get_temp_project()
 
-    project.create_module("foo", "x = 1")
+    project.create_module("foo", "x = 1\n")
 
     module_path = project.root / "foo.py"
     assert module_path.exists()
     with open(module_path, "r") as f:
-        assert f.read() == "x = 1"
+        assert f.read() == "x = 1\n"
 
 
 def test_project_add_module_and_subpackages():
     project = get_temp_project()
 
-    project.create_module("foo.bar.baz", "x = 1")
+    project.create_module("foo.bar.baz", "x = 1\n")
 
     module_path = project.root / "foo/bar/baz.py"
     assert (project.root / "foo/bar/__init__.py").exists()
     assert (project.root / "foo/__init__.py").exists()
     assert module_path.exists()
     with open(module_path, "r") as f:
-        assert f.read() == "x = 1"
+        assert f.read() == "x = 1\n"
