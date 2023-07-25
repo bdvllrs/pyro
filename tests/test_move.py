@@ -199,7 +199,7 @@ def test_move_other_unrelated_file():
         """
         def test():
             return 1
-        
+
 
         x = test()
     """
