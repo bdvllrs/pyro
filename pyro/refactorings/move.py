@@ -20,6 +20,7 @@ from pyro.refactorings.imports import (
     AddImports,
     ImportT,
     RemoveUnusedImports,
+    attribute_matcher_from_module_name,
     import_from_module_name,
 )
 
@@ -427,16 +428,6 @@ class ReplaceImportIfNeeded(cst.CSTTransformer):
                 return cst.Name(value=self._symbol_name)
         return updated_node
 
-    def _get_import_module(
-        self, module: Sequence[str]
-    ) -> Union[m.Name, m.Attribute]:
-        if len(module) == 1:
-            return m.Name(value=module[0])
-        return m.Attribute(
-            value=self._get_import_module(module[:-1]),
-            attr=m.Name(value=module[-1]),
-        )
-
     def _remove_import_from_names(
         self, names: Iterable[cst.ImportAlias] | cst.ImportStar
     ) -> list[cst.ImportAlias] | cst.ImportStar:
@@ -461,7 +452,9 @@ class ReplaceImportIfNeeded(cst.CSTTransformer):
         return m.matches(
             node,
             m.ImportFrom(
-                module=self._get_import_module(self._old_module_name),
+                module=attribute_matcher_from_module_name(
+                    self._old_module_name
+                ),
                 names=[
                     m.ZeroOrMore(),
                     m.ImportAlias(name=m.Name(value=self._symbol_name)),
@@ -489,7 +482,9 @@ class ReplaceImportIfNeeded(cst.CSTTransformer):
         if m.matches(
             updated_node,
             m.ImportFrom(
-                module=self._get_import_module(self._new_module_name),
+                module=attribute_matcher_from_module_name(
+                    self._new_module_name
+                ),
             ),
         ):
             import_names = cst.ensure_type(updated_node, cst.ImportFrom).names

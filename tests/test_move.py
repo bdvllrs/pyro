@@ -1,13 +1,7 @@
-from textwrap import dedent
-
 import pytest
-from utils import get_temp_project
+from utils import get_temp_project, code
 
 from pyro.refactorings import move
-
-
-def code(source: str) -> str:
-    return dedent(source).strip() + "\n"
 
 
 def test_move():

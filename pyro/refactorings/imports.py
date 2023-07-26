@@ -1,6 +1,6 @@
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
-from typing import cast
+from typing import Union, cast
 
 import libcst as cst
 import libcst.matchers as m
@@ -20,6 +20,20 @@ def attribute_from_module_name(
     return cst.Attribute(
         value=attribute_from_module_name(module_name[:-1]),
         attr=cst.Name(value=module_name[-1]),
+    )
+
+
+def attribute_matcher_from_module_name(
+    module_name: Sequence[str],
+) -> Union[m.Attribute, m.Name]:
+    if len(module_name) == 0:
+        raise ValueError("module_name must not be empty")
+
+    if len(module_name) == 1:
+        return m.Name(value=module_name[0])
+    return m.Attribute(
+        value=attribute_matcher_from_module_name(module_name[:-1]),
+        attr=m.Name(value=module_name[-1]),
     )
 
 
