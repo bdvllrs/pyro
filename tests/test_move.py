@@ -771,6 +771,62 @@ def test_move_symbol_with_external_dependency_class():
     assert project.get_module_content("mod2") == mod2_expected
 
 
+def test_move_symbol_class_with_dependencies():
+    project = get_temp_project()
+
+    mod1 = code(
+        """
+        def test():
+            return 1
+
+
+        class Test:
+            attr = 3
+
+            def fn(self):
+                return test()
+
+            def a(self, x):
+                x = self.fn()
+                return x + self.attr
+    """
+    )
+
+    mod2 = ""
+
+    project.create_module("mod1", mod1)
+    project.create_module("mod2", mod2)
+
+    move(project, "mod1", 5, 6, "mod2")
+
+    mod1_expected = code(
+        """
+        def test():
+            return 1
+    """
+    )
+
+    mod2_expected = code(
+        """
+        from mod1 import test
+
+
+        class Test:
+            attr = 3
+
+            def fn(self):
+                return test()
+
+            def a(self, x):
+                x = self.fn()
+                return x + self.attr
+    """
+    )
+
+    assert project.get_module_content("mod1") == mod1_expected
+    assert project.get_module_content("mod2") == mod2_expected
+
+
 def test_move_symbol_with_external_dependency_keep_dependency():
     project = get_temp_project()
 
@@ -926,3 +982,45 @@ def test_move_symbol_with_internal_dependency():
 
     assert project.get_module_content("mod1") == mod1_expected
     assert project.get_module_content("mod2") == mod2_expected
+
+
+def test_move_symbol_with_init_file():
+    project = get_temp_project()
+
+    mod1 = code(
+        """
+        def test():
+            return 1
+    """
+    )
+
+    init_file = code(
+        """
+        from mod1 import fn
+
+        __all__ = ["fn"]
+    """
+    )
+
+    project.create_module("mod1", mod1)
+    project.create_module("mod2", "")
+    project.create_module("__init__", init_file)
+
+    move(project, "mod1", 1, 5, "mod2")
+    mod2_expected = code(
+        """
+        def test():
+            return 1
+    """
+    )
+    init_expected = code(
+        """
+        from mod2 import fn
+
+        __all__ = ["fn"]
+    """
+    )
+
+    assert project.get_module_content("mod1") == "\n"
+    assert project.get_module_content("mod2") == mod2_expected
+    assert project.get_module_content("__init__") == init_expected

@@ -24,20 +24,6 @@ from pyro.refactorings.imports import (
     import_from_module_name,
 )
 
-
-class FindSymbolDependencies(cst.CSTVisitor):
-    METADATA_DEPENDENCIES = (PositionProvider,)
-
-    def __init__(
-        self,
-        current_line: int,
-        current_column: int,
-    ) -> None:
-        super().__init__()
-        self._current_line = current_line
-        self._current_column = current_column
-
-
 SymbolT = cst.FunctionDef | cst.ClassDef
 
 
@@ -98,7 +84,10 @@ class RemoveSymbolAtLocation(cst.CSTTransformer):
         return correct_line and correct_column
 
     def _node_requirements(
-        self, scope: Scope, node: cst.CSTNode | None = None
+        self,
+        parent_scope: Scope,
+        scope: Scope,
+        node: cst.CSTNode | None = None,
     ) -> dict[str, ImportT]:
         referents: dict[str, ImportT] = {}
         for access in scope.accesses:
@@ -106,6 +95,11 @@ class RemoveSymbolAtLocation(cst.CSTTransformer):
                 if not isinstance(referent, Assignment):
                     continue
                 if node is not None and access.node != node:
+                    continue
+
+                if isinstance(parent_scope, LocalScope) and is_subscope_of(
+                    parent_scope, referent.scope
+                ):
                     continue
 
                 if isinstance(referent.node, (cst.Import, cst.ImportFrom)):
@@ -150,7 +144,7 @@ class RemoveSymbolAtLocation(cst.CSTTransformer):
                     ):
                         continue
                     self.symbol_requirements.update(
-                        self._node_requirements(scope)
+                        self._node_requirements(parent_scope, scope)
                     )
             return False
         return True
@@ -202,7 +196,7 @@ class RemoveSymbolAtLocation(cst.CSTTransformer):
             if scope is None or not isinstance(scope, GlobalScope):
                 continue
             self.symbol_requirements.update(
-                self._node_requirements(scope, node)
+                self._node_requirements(scope, scope, node)
             )
         return True
 
