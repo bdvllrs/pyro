@@ -5,7 +5,6 @@ from typing import Union, cast
 import libcst as cst
 import libcst.matchers as m
 from libcst.helpers import get_full_name_for_node
-
 from libcst.metadata import (
     Assignment,
     BuiltinScope,

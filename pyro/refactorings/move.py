@@ -182,9 +182,7 @@ class RemoveSymbolAtLocation(cst.CSTTransformer):
                     cst.Name,
                 ).value
             else:
-                raise ValueError(
-                    "Cannot extract assignment of multiple variables yet."
-                )
+                raise ValueError("This cannot be extracted.")
             self.removed_symbol = node
             self.symbol_name = symbol_name
         return True
@@ -349,7 +347,9 @@ def move(
         symbol_remover.removed_symbol is None
         or symbol_remover.symbol_name is None
     ):
-        raise Exception("No symbol found at location")
+        raise Exception(
+            f"No symbol found at location L{line_number} C{column_offset}"
+        )
 
     module_start.visit(
         AddImports(
