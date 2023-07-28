@@ -1049,14 +1049,18 @@ def test_move_symbol_with_init_file():
         """
         def test():
             return 1
+
+
+        def fn():
+            return 2
     """
     )
 
     init_file = code(
         """
-        from mod1 import fn
+        from mod1 import test, fn
 
-        __all__ = ["fn"]
+        __all__ = ["fn", "test"]
     """
     )
 
@@ -1065,6 +1069,12 @@ def test_move_symbol_with_init_file():
     project.create_module("__init__", init_file)
 
     move(project, "mod1", 1, 5, "mod2")
+    mod1_expected = code(
+        """
+        def fn():
+            return 2
+    """
+    )
     mod2_expected = code(
         """
         def test():
@@ -1073,12 +1083,13 @@ def test_move_symbol_with_init_file():
     )
     init_expected = code(
         """
-        from mod2 import fn
+        from mod1 import fn
+        from mod2 import test
 
-        __all__ = ["fn"]
+        __all__ = ["fn", "test"]
     """
     )
 
-    assert project.get_module_content("mod1") == "\n"
+    assert project.get_module_content("mod1") == mod1_expected
     assert project.get_module_content("mod2") == mod2_expected
     assert project.get_module_content("__init__") == init_expected

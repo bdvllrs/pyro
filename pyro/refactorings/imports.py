@@ -12,6 +12,7 @@ import libcst.matchers as m
 from libcst.metadata import (
     Assignment,
     BuiltinScope,
+    ImportAssignment,
     ParentNodeProvider,
     Scope,
 )
@@ -58,11 +59,12 @@ def import_from_module_name(
 
 
 def find_unused_imports(
-    scopes: Iterable[Scope | None],
+    scopes: Iterable[Scope | None], exports: set[str] | None = None
 ) -> dict[cst.Import | cst.ImportFrom, set[str]]:
     """
     Inspired from libCST scope analysis tutorial.
     """
+    mod_exports = exports or set()
     unused_imports: dict[cst.Import | cst.ImportFrom, set[str]] = defaultdict(
         set
     )
@@ -73,7 +75,10 @@ def find_unused_imports(
             if isinstance(assignment, Assignment) and isinstance(
                 assignment.node, (cst.Import, cst.ImportFrom)
             ):
-                if not len(assignment.references):
+                if (
+                    not len(assignment.references)
+                    and assignment.name not in mod_exports
+                ):
                     unused_imports[assignment.node].add(assignment.name)
     return unused_imports
 
@@ -95,10 +100,12 @@ class RemoveUnusedImports(cst.CSTTransformer):
     Inspired from libCST scope analysis tutorial.
     """
 
-    def __init__(self, scopes: Iterable[Scope | None]) -> None:
+    def __init__(
+        self, scopes: Iterable[Scope | None], exports: set[str] | None = None
+    ) -> None:
         super().__init__()
 
-        self.unused_imports = find_unused_imports(scopes)
+        self.unused_imports = find_unused_imports(scopes, exports)
 
     def leave_import_alike(
         self,
@@ -252,7 +259,7 @@ class ReplaceImport(cst.CSTTransformer):
         self.did_update = False
         self._old_import_computed: bool = False
         self._old_import: cst.Import | cst.ImportFrom | None = None
-        self._other_assignments: set[cst.CSTNode] = set()
+        self._other_assignments: bool = False
         self._ref_replacements: set[
             cst.Name | cst.Attribute | cst.BaseString
         ] = set()
@@ -279,18 +286,21 @@ class ReplaceImport(cst.CSTTransformer):
 
     def _get_old_import(
         self,
-    ) -> tuple[cst.Import | cst.ImportFrom | None, set[cst.CSTNode]]:
+    ) -> tuple[cst.Import | cst.ImportFrom | None, bool]:
         if self._old_import_computed:
-            return self._old_import, self._other_assignments
+            return (
+                self._old_import,
+                self._other_assignments,
+            )
 
         self._old_import_computed = True
         assignment_node: cst.Import | cst.ImportFrom | None = None
-        other_assignments: set[cst.CSTNode] = set()
+        other_assignments: bool = False
         for scope in self._scopes:
             if scope is None or isinstance(scope, BuiltinScope):
                 continue
             for assignment in scope.assignments:
-                if isinstance(assignment, Assignment) and isinstance(
+                if isinstance(assignment, ImportAssignment) and isinstance(
                     assignment.node, (cst.ImportFrom, cst.Import)
                 ):
                     for reference in assignment.references:
@@ -310,7 +320,22 @@ class ReplaceImport(cst.CSTTransformer):
                                 assignment_node = assignment.node
                                 self._ref_replacements.add(ref_attr)
                             else:
-                                other_assignments.add(reference.node)
+                                other_assignments = True
+
+                    if assignment_node is not None:
+                        continue
+
+                    for export in self._mod_exports:
+                        if is_import_of_module(
+                            [self._from[0]],
+                            list(self._from[1:]),
+                            assignment.node,
+                        ):
+                            if self._from[-1] == export:
+                                self._should_add_import = True
+                                assignment_node = assignment.node
+                            else:
+                                other_assignments = True
 
         self._old_import = assignment_node
         self._other_assignments = other_assignments
@@ -359,11 +384,11 @@ class ReplaceImport(cst.CSTTransformer):
         if old_import != original_node:
             return [updated_node]
 
+        new_import = self._get_new_import()
         self.should_add_import = False
         self.did_update = True
-        new_import = self._get_new_import()
 
-        if not len(other_assignments):
+        if not other_assignments:
             return [new_import]
 
         names = updated_node.names
@@ -392,11 +417,11 @@ class ReplaceImport(cst.CSTTransformer):
         if old_import != updated_node:
             return [updated_node]
 
+        new_import = self._get_new_import()
         self.should_add_import = False
         self.did_update = True
-        new_import = self._get_new_import()
 
-        if not len(other_assignments):
+        if not other_assignments:
             return [new_import]
         return [updated_node, new_import]
 

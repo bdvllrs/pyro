@@ -336,6 +336,9 @@ def move(
     module_start = project.get_module(module_name_start)
     module_end = project.get_module(module_name_end)
 
+    export_gatherer = GatherExportsVisitor()
+    module_start.visit(export_gatherer)
+
     wrapper = cst.MetadataWrapper(module_start.tree)
     scopes = set(wrapper.resolve(ScopeProvider).values())
     symbol_remover = RemoveSymbolAtLocation(
@@ -365,7 +368,10 @@ def move(
 
     wrapper = cst.MetadataWrapper(module_start.tree)
     scopes = set(wrapper.resolve(ScopeProvider).values())
-    module_start.visit_with_metadata(wrapper, RemoveUnusedImports(scopes))
+    module_start.visit_with_metadata(
+        wrapper,
+        RemoveUnusedImports(scopes, export_gatherer.explicit_exported_objects),
+    )
 
     module_end.visit(
         AddImports(list(symbol_remover.symbol_requirements.values()))
@@ -397,7 +403,12 @@ def move(
         if replacer.did_update:
             wrapper = cst.MetadataWrapper(module.tree)
             scopes = set(wrapper.resolve(ScopeProvider).values())
-            module.visit_with_metadata(wrapper, RemoveUnusedImports(scopes))
+            module.visit_with_metadata(
+                wrapper,
+                RemoveUnusedImports(
+                    scopes, export_gatherer.explicit_exported_objects
+                ),
+            )
 
             modules_to_save.append((module_name, module))
 
