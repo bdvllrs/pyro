@@ -1,9 +1,5 @@
-from typing import TypeVar
-
 import libcst as cst
 from libcst.metadata import MetadataWrapper
-
-_T = TypeVar("_T")
 
 
 class Module:

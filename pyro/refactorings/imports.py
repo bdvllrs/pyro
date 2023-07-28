@@ -1,14 +1,11 @@
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from typing import Union, cast
-from typing import Set, Union
 
 import libcst as cst
 import libcst.matchers as m
 from libcst.helpers import get_full_name_for_node
 
-import libcst as cst
-import libcst.matchers as m
 from libcst.metadata import (
     Assignment,
     BuiltinScope,
@@ -477,11 +474,11 @@ class GatherExportsVisitor(cst.CSTVisitor):
 
     def __init__(self) -> None:
         super().__init__()
-        self.explicit_exported_objects: Set[str] = set()
-        self._is_assigned_export: Set[
+        self.explicit_exported_objects: set[str] = set()
+        self._is_assigned_export: set[
             Union[cst.Tuple, cst.List, cst.Set]
         ] = set()
-        self._in_assigned_export: Set[
+        self._in_assigned_export: set[
             Union[cst.Tuple, cst.List, cst.Set]
         ] = set()
 
