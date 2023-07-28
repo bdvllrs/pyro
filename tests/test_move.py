@@ -1093,3 +1093,76 @@ def test_move_symbol_with_init_file():
     assert project.get_module_content("mod1") == mod1_expected
     assert project.get_module_content("mod2") == mod2_expected
     assert project.get_module_content("__init__") == init_expected
+
+
+def test_type_requirements():
+    project = get_temp_project()
+
+    mod1 = code(
+        """
+        from typing import List
+
+
+        def test(x: List[str]):
+            return len(x)
+    """
+    )
+
+    project.create_module("mod1", mod1)
+    project.create_module("mod2", "")
+
+    move(project, "mod1", 5, 5, "mod2")
+    mod2_expected = code(
+        """
+        from typing import List
+
+
+        def test(x: List[str]):
+            return len(x)
+    """
+    )
+
+    assert project.get_module_content("mod1") == "\n"
+    assert project.get_module_content("mod2") == mod2_expected
+
+
+def test_type_local_requirements():
+    project = get_temp_project()
+
+    mod1 = code(
+        """
+        from typing import List, TypeVar
+
+        T = TypeVar("T")
+
+
+        def test(x: List[T]) -> T:
+            return x[0]
+    """
+    )
+
+    project.create_module("mod1", mod1)
+    project.create_module("mod2", "")
+
+    move(project, "mod1", 5, 5, "mod2")
+    mod1_expected = code(
+        """
+        from typing import List, TypeVar
+
+        T = TypeVar("T")
+    """
+    )
+    mod2_expected = code(
+        """
+        from typing import TypeVar
+
+        from mod1 import T
+
+
+        def test(x: List[T]) -> T:
+            return x[0]
+    """
+    )
+
+    assert project.get_module_content("mod1") == mod1_expected
+    assert project.get_module_content("mod2") == mod2_expected
