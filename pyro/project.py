@@ -7,7 +7,7 @@ from pyro.module import Module
 
 def reformat_file(location: Path) -> None:
     source_file = str(location.resolve())
-    subprocess.run(["isort", "--profile", "black", source_file])
+    subprocess.run(["isort", "--profile", "black", "-q", source_file])
     subprocess.run(["black", "--fast", "-q", source_file])
 
 
