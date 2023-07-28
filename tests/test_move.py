@@ -342,6 +342,64 @@ def test_move_other_dependencies_import_from():
     assert project.get_module_content("mod3") == mod3_expected
 
 
+def test_move_other_dependencies_import_from_in_local_scope():
+    project = get_temp_project()
+
+    mod1 = code(
+        """
+        def test():
+            return 1
+
+
+        x = test()
+    """
+    )
+    mod3 = code(
+        """
+        def fn():
+            from mod1 import test
+
+            return test()
+
+
+        x = fn()
+    """
+    )
+    project.create_module("mod1", mod1)
+    project.create_module("mod2", "")
+    project.create_module("mod3", mod3)
+
+    move(project, "mod1", 1, 5, "mod2")
+
+    mod1_expected = code(
+        """
+        from mod2 import test
+
+        x = test()
+    """
+    )
+    mod2_expected = code(
+        """
+        def test():
+            return 1
+    """
+    )
+    mod3_expected = code(
+        """
+        def fn():
+            from mod2 import test
+
+            return test()
+
+
+        x = fn()
+    """
+    )
+    assert project.get_module_content("mod1") == mod1_expected
+    assert project.get_module_content("mod2") == mod2_expected
+    assert project.get_module_content("mod3") == mod3_expected
+
+
 def test_move_other_dependencies_multiple_import_from_start():
     project = get_temp_project()
 

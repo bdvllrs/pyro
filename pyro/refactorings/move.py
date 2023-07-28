@@ -1,5 +1,5 @@
-from collections.abc import Iterable, Mapping, Sequence
-from typing import Any, Union, cast
+from collections.abc import Iterable
+from typing import Any
 
 import libcst as cst
 import libcst.matchers as m
@@ -18,9 +18,10 @@ from pyro.module import Module
 from pyro.project import Project
 from pyro.refactorings.imports import (
     AddImports,
+    GatherExportsVisitor,
     ImportT,
     RemoveUnusedImports,
-    attribute_matcher_from_module_name,
+    ReplaceImport,
     import_from_module_name,
 )
 
@@ -325,232 +326,6 @@ class InsertSymbolEnd(cst.CSTTransformer):
         )
 
 
-def _get_symbol_access_matcher(
-    module: list[str],
-) -> Union[m.Name, m.Attribute]:
-    if len(module) == 1:
-        return m.Name(value=module[0])
-    return m.Attribute(
-        value=_get_symbol_access_matcher(module[:-1]),
-        attr=m.Name(value=module[-1]),
-    )
-
-
-class ReplaceImportIfNeeded(cst.CSTTransformer):
-    def __init__(
-        self,
-        old_package_name: str,
-        new_package_name: str,
-        symbol_name: str,
-        symbol_requirements: Mapping[str, ImportT],
-    ) -> None:
-        super().__init__()
-
-        self._new_module_name = new_package_name.split(".")
-        self._new_package_name = new_package_name
-
-        self._old_module_name = old_package_name.split(".")
-        self._old_package_name = old_package_name
-        self._symbol_name = symbol_name
-        self._symbol_requirement = symbol_requirements
-
-        self._add_import: bool = False
-        self._import_alread_added: bool = False
-        self._symbol_schemas: list[m.BaseMatcherNode] = []
-
-        self.did_replace: bool = False
-
-    def visit_ImportFrom(self, node: cst.ImportFrom) -> bool | None:
-        # Do not visit inside import so that the visit_Name only
-        # concerns using the symbol
-        return False
-
-    def _imports_package_or_module(
-        self, node: cst.BaseExpression, module: list[str]
-    ) -> tuple[Union[m.Name, m.Attribute, None], list[str] | None]:
-        name = m.Name(value=module[0])
-        if m.matches(node, name):
-            return name, [module[0]]
-
-        if isinstance(node, cst.Name):
-            return None, None
-
-        if not isinstance(node, cst.Attribute):
-            raise ValueError()
-
-        sub_match, sub_module = self._imports_package_or_module(
-            cst.ensure_type(node, cst.Attribute).value, module
-        )
-        if sub_match is None or sub_module is None:
-            return None, None
-
-        rest_module = module[len(sub_module) :]
-        new_attr = m.Attribute(
-            value=sub_match, attr=m.Name(value=rest_module[0])
-        )
-        return new_attr, sub_module + [rest_module[0]]
-
-    def visit_Import(self, node: cst.Import) -> bool | None:
-        for name in node.names:
-            match_attr, _ = self._imports_package_or_module(
-                name.name, self._old_module_name + [self._symbol_name]
-            )
-            if match_attr is None:
-                return False
-
-            if m.matches(name.name, match_attr):
-                self._symbol_schemas.append(
-                    _get_symbol_access_matcher(
-                        self._old_module_name + [self._symbol_name]
-                    )
-                )
-        # Do not visit inside import so that the visit_Name only
-        # concerns using the symbol
-        return False
-
-    def visit_Name(self, node: cst.Name) -> bool | None:
-        if node.value == self._symbol_name:
-            self._add_import = True
-            return False
-        return True
-
-    def leave_Attribute(
-        self, original_node: cst.Attribute, updated_node: cst.Attribute
-    ) -> cst.Attribute | cst.Name:
-        for schema in self._symbol_schemas:
-            if m.matches(original_node, schema):
-                return cst.Name(value=self._symbol_name)
-        return updated_node
-
-    def _remove_import_from_names(
-        self, names: Iterable[cst.ImportAlias] | cst.ImportStar
-    ) -> list[cst.ImportAlias] | cst.ImportStar:
-        new_names: list[cst.ImportAlias] = []
-        if isinstance(names, cst.ImportStar):
-            return names
-        for name in names:
-            if not m.matches(
-                name,
-                m.ImportAlias(
-                    name=m.Name(
-                        value=self._symbol_name,
-                    )
-                ),
-            ):
-                new_names.append(
-                    name.with_changes(comma=cst.MaybeSentinel.DEFAULT)
-                )
-        return new_names
-
-    def _imports_symbol_from_old_path(self, node: cst.CSTNode) -> bool:
-        return m.matches(
-            node,
-            m.ImportFrom(
-                module=attribute_matcher_from_module_name(
-                    self._old_module_name
-                ),
-                names=[
-                    m.ZeroOrMore(),
-                    m.ImportAlias(name=m.Name(value=self._symbol_name)),
-                    m.ZeroOrMore(),
-                ],
-            ),
-        )
-
-    def leave_ImportFrom(
-        self, original_node: cst.ImportFrom, updated_node: cst.ImportFrom
-    ) -> cst.ImportFrom | cst.RemovalSentinel:
-        if self._imports_symbol_from_old_path(updated_node):
-            names = self._remove_import_from_names(
-                cst.ensure_type(updated_node, cst.ImportFrom).names
-            )
-
-            if isinstance(names, cst.ImportStar):
-                return updated_node
-
-            if not len(names):
-                self.did_replace = True
-                return cst.RemoveFromParent()
-            self.did_replace = True
-            return updated_node.with_changes(names=names)
-        if m.matches(
-            updated_node,
-            m.ImportFrom(
-                module=attribute_matcher_from_module_name(
-                    self._new_module_name
-                ),
-            ),
-        ):
-            import_names = cst.ensure_type(updated_node, cst.ImportFrom).names
-
-            if isinstance(import_names, cst.ImportStar):
-                return updated_node
-
-            new_names: list[cst.ImportAlias] = []
-            for name in cast(Sequence[cst.ImportAlias], import_names):
-                new_names.append(
-                    name.with_changes(comma=cst.MaybeSentinel.DEFAULT)
-                )
-            new_names.append(
-                cst.ImportAlias(
-                    name=cst.Name(value=self._symbol_name),
-                    comma=cst.MaybeSentinel.DEFAULT,
-                )
-            )
-            self._import_alread_added = True
-            self.did_replace = True
-            return updated_node.with_changes(names=new_names)
-        return updated_node
-
-    def _end_imports_index(self, body: Sequence[cst.CSTNode]) -> int:
-        for i, node in enumerate(body):
-            if m.matches(
-                node,
-                m.SimpleStatementLine(
-                    body=[
-                        m.AtLeastN(
-                            n=1,
-                            matcher=(m.Import() | m.ImportFrom()),
-                        ),
-                    ]
-                )
-                | m.Import
-                | m.ImportFrom,
-            ):
-                continue
-            return i
-        return len(body)
-
-    def leave_Module(
-        self, original_node: cst.Module, updated_node: cst.Module
-    ) -> cst.Module:
-        if self._add_import and not self._import_alread_added:
-            end_imports_index = self._end_imports_index(updated_node.body)
-            import_statements = updated_node.body[:end_imports_index]
-            rest_body = updated_node.body[end_imports_index:]
-            new_import = cst.parse_statement(
-                f"from {self._new_package_name} import {self._symbol_name}",
-                config=original_node.config_for_parsing,
-            )
-            new_body = (*import_statements, new_import, *rest_body)
-            self.did_replace = True
-            return cst.ensure_type(
-                updated_node.with_changes(
-                    body=new_body,
-                ),
-                cst.Module,
-            )
-        return updated_node
-
-
-def symbol_dependencies(
-    module: Module,
-    line_number: int,
-    column_offset: int,
-):
-    pass
-
-
 def move(
     project: Project,
     module_name_start: str,
@@ -572,14 +347,22 @@ def move(
         or symbol_remover.symbol_name is None
     ):
         raise Exception("No symbol found at location")
+
     module_start.visit(
-        ReplaceImportIfNeeded(
-            module_name_start,
-            module_name_end,
-            symbol_remover.symbol_name,
-            symbol_remover.symbol_requirements,
+        AddImports(
+            [
+                import_from_module_name(
+                    module_name_end.split("."),
+                    names=[
+                        cst.ImportAlias(
+                            name=cst.Name(value=symbol_remover.symbol_name),
+                        )
+                    ],
+                )
+            ]
         )
     )
+
     wrapper = cst.MetadataWrapper(module_start.tree)
     scopes = set(wrapper.resolve(ScopeProvider).values())
     module_start.visit_with_metadata(wrapper, RemoveUnusedImports(scopes))
@@ -598,15 +381,20 @@ def move(
         if module_name == module_name_start or module_name == module_name_end:
             continue
 
-        replacer = ReplaceImportIfNeeded(
-            module_name_start,
-            module_name_end,
-            symbol_remover.symbol_name,
-            symbol_remover.symbol_requirements,
-        )
-        module.visit(replacer)
+        export_gatherer = GatherExportsVisitor()
+        module.visit(export_gatherer)
 
-        if replacer.did_replace:
+        wrapper = cst.MetadataWrapper(module.tree)
+        scopes = set(wrapper.resolve(ScopeProvider).values())
+        replacer = ReplaceImport(
+            scopes,
+            module_name_start.split(".") + [symbol_remover.symbol_name],
+            module_name_end.split(".") + [symbol_remover.symbol_name],
+            export_gatherer.explicit_exported_objects,
+        )
+        module.visit_with_metadata(wrapper, replacer)
+
+        if replacer.did_update:
             wrapper = cst.MetadataWrapper(module.tree)
             scopes = set(wrapper.resolve(ScopeProvider).values())
             module.visit_with_metadata(wrapper, RemoveUnusedImports(scopes))

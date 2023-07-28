@@ -1,14 +1,12 @@
 from collections.abc import Iterable, Sequence
-import libcst as cst
-import libcst.matchers as m
 from typing import Any
 
+import libcst as cst
 from libcst.metadata import Assignment, GlobalScope, Scope, ScopeProvider
+
 from pyro.module import Module
-
-
 from pyro.project import Project
-from pyro.refactorings.imports import attribute_matcher_from_module_name
+from pyro.refactorings.imports import is_import_of_module, sequence_from_attr
 
 
 class ReorderFuncDefArgs(cst.CSTTransformer):
@@ -67,41 +65,6 @@ class ReorderFuncDefArgs(cst.CSTTransformer):
         return updated_node
 
 
-def is_import_from_of_module(
-    module: Sequence[str],
-    names: Sequence[str],
-    node: cst.ImportFrom,
-) -> bool:
-    if not len(names) or not len(module):
-        return False
-
-    is_matching = m.matches(
-        node,
-        m.ImportFrom(
-            module=attribute_matcher_from_module_name(module),
-            names=[
-                m.AtLeastN(
-                    n=1,
-                    matcher=m.ImportAlias(
-                        name=attribute_matcher_from_module_name(names)
-                    ),
-                )
-            ],
-        ),
-    )
-    if is_matching:
-        return True
-    return is_import_from_of_module(list(module) + [names[0]], names[1:], node)
-
-
-def sequence_from_attr(node: cst.BaseExpression) -> list[str]:
-    if isinstance(node, cst.Name):
-        return [node.value]
-    elif isinstance(node, cst.Attribute):
-        return sequence_from_attr(node.value) + [node.attr.value]
-    raise ValueError(f"Expected Name or Attribute, got {node}")
-
-
 def reorder_args(
     args: Sequence[cst.Arg], new_order: Sequence[int]
 ) -> list[cst.Arg]:
@@ -129,11 +92,11 @@ class ReorderFuncCallArgs(cst.CSTTransformer):
             if isinstance(scope, GlobalScope):
                 for assignment in scope.assignments:
                     if isinstance(assignment, Assignment) and isinstance(
-                        assignment.node, (cst.ImportFrom)
+                        assignment.node, (cst.ImportFrom, cst.Import)
                     ):
                         for access in assignment.references:
                             access_elems = sequence_from_attr(access.node)
-                            if not is_import_from_of_module(
+                            if not is_import_of_module(
                                 [self.module_name[0]],
                                 list(self.module_name[1:]) + access_elems[1:],
                                 assignment.node,

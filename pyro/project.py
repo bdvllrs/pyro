@@ -44,7 +44,8 @@ class Project:
 
         init_file = location / "__init__.py"
         init_file.parent.mkdir(exist_ok=True)
-        init_file.touch()
+        if not init_file.exists():
+            init_file.touch()
 
     def get_module_content(self, name: str) -> str:
         location = self.get_module_path(name)

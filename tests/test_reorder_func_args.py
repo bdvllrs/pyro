@@ -118,3 +118,85 @@ def test_rename_func_name_other_file_change_order():
 
     assert project.get_module_content("mod1") == mod1_expected
     assert project.get_module_content("mod2") == mod2_expected
+
+
+def test_rename_func_name_other_file_change_order_import():
+    project = get_temp_project()
+
+    mod1 = code(
+        """
+        def test(a, b, c):
+            return a + b + c
+    """
+    )
+
+    mod2 = code(
+        """
+        import pkg
+
+        x = pkg.mod1.test(1, 2, 3)
+    """
+    )
+
+    project.create_module("pkg.mod1", mod1)
+    project.create_module("mod2", mod2)
+
+    reorder_func_arg(project, "pkg.mod1", "test", [0, 2, 1])
+    mod1_expected = code(
+        """
+        def test(a, c, b):
+            return a + b + c
+    """
+    )
+
+    mod2_expected = code(
+        """
+        import pkg
+
+        x = pkg.mod1.test(1, 3, 2)
+    """
+    )
+
+    assert project.get_module_content("pkg.mod1") == mod1_expected
+    assert project.get_module_content("mod2") == mod2_expected
+
+
+def test_rename_func_should_not_change_unrelevant_files():
+    project = get_temp_project()
+
+    mod1 = code(
+        """
+        def test(a, b, c):
+            return a + b + c
+    """
+    )
+
+    mod2 = code(
+        """
+        import mod1
+
+        x = mod1.test(1, 2, 3)
+    """
+    )
+
+    project.create_module("pkg.mod1", mod1)
+    project.create_module("mod2", mod2)
+
+    reorder_func_arg(project, "pkg.mod1", "test", [0, 2, 1])
+    mod1_expected = code(
+        """
+        def test(a, c, b):
+            return a + b + c
+    """
+    )
+
+    mod2_expected = code(
+        """
+        import mod1
+
+        x = mod1.test(1, 2, 3)
+    """
+    )
+
+    assert project.get_module_content("pkg.mod1") == mod1_expected
+    assert project.get_module_content("mod2") == mod2_expected
