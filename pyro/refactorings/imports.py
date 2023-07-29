@@ -49,8 +49,13 @@ def import_from_module_name(
     names: Sequence[cst.ImportAlias] | cst.ImportStar,
 ) -> cst.ImportFrom:
     return cst.ImportFrom(
-        module=attribute_from_module_name(module_name),
-        names=names,
+        module=attribute_from_module_name(module_name), names=names
+    )
+
+
+def get_import(module_name: Sequence[str], symbol_name: str) -> cst.ImportFrom:
+    return import_from_module_name(
+        module_name, names=[cst.ImportAlias(name=cst.Name(symbol_name))]
     )
 
 

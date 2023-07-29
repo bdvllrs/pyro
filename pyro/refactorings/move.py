@@ -7,7 +7,7 @@ from libcst.metadata import (
     Assignment,
     BuiltinScope,
     CodeRange,
-    GlobalScope,
+    ParentNodeProvider,
     PositionProvider,
     Scope,
     ScopeProvider,
@@ -22,6 +22,7 @@ from pyro.refactorings.imports import (
     ImportT,
     RemoveUnusedImports,
     ReplaceImport,
+    get_import,
     import_from_module_name,
 )
 
@@ -51,8 +52,22 @@ def is_subscope_of(parent_scope: Scope, scope: Scope | None) -> bool:
     return is_subscope_of(parent_scope, scope.parent)
 
 
+def remove_leading_lines(
+    node: cst.SimpleStatementLine | cst.BaseCompoundStatement,
+) -> cst.SimpleStatementLine | cst.BaseCompoundStatement:
+    leading_lines = []
+    for line in node.leading_lines:
+        if line.comment is not None:
+            leading_lines.append(line)
+    return node.with_changes(leading_lines=leading_lines)
+
+
 class RemoveSymbolAtLocation(cst.CSTTransformer):
-    METADATA_DEPENDENCIES = (PositionProvider,)
+    METADATA_DEPENDENCIES = (
+        PositionProvider,
+        ParentNodeProvider,
+        ScopeProvider,
+    )
 
     def __init__(
         self,
@@ -84,6 +99,18 @@ class RemoveSymbolAtLocation(cst.CSTTransformer):
         )
         return correct_line and correct_column
 
+    def _get_parent_annotation(
+        self, node: cst.CSTNode
+    ) -> cst.Annotation | None:
+        ref_parent = cst.ensure_type(
+            self.get_metadata(ParentNodeProvider, node), cst.CSTNode
+        )
+        if isinstance(ref_parent, cst.Module):
+            return None
+        if isinstance(ref_parent, cst.Annotation):
+            return ref_parent
+        return self._get_parent_annotation(ref_parent)
+
     def _node_requirements(
         self,
         parent_scope: Scope,
@@ -103,27 +130,30 @@ class RemoveSymbolAtLocation(cst.CSTTransformer):
                 ):
                     continue
 
-                if isinstance(referent.node, (cst.Import, cst.ImportFrom)):
+                if isinstance(referent.node, cst.Import):
                     import_node = referent.node
+                elif isinstance(referent.node, cst.ImportFrom):
+                    name: cst.Name | cst.Attribute
+
+                    if isinstance(access.node, (cst.Attribute, cst.Name)):
+                        name = access.node
+                    else:
+                        raise ValueError(
+                            f"Cannot import node of type {type(access.node)}."
+                        )
+
+                    import_node = referent.node.with_changes(
+                        names=[cst.ImportAlias(name=name)]
+                    )
                 elif isinstance(referent.node, cst.Name):
-                    import_node = import_from_module_name(
-                        self._module_name,
-                        names=[
-                            cst.ImportAlias(
-                                name=cst.Name(value=referent.node.value),
-                            )
-                        ],
+                    import_node = get_import(
+                        self._module_name, referent.node.value
                     )
                 elif isinstance(
                     referent.node, (cst.ClassDef, cst.FunctionDef)
                 ):
-                    import_node = import_from_module_name(
-                        self._module_name,
-                        names=[
-                            cst.ImportAlias(
-                                name=referent.node.name,
-                            )
-                        ],
+                    import_node = get_import(
+                        self._module_name, referent.node.name.value
                     )
                 else:
                     continue
@@ -131,7 +161,10 @@ class RemoveSymbolAtLocation(cst.CSTTransformer):
                 referents[referent.name] = import_node
         return referents
 
-    def visit_symbol(self, node: SymbolT) -> bool | None:
+    def _get_scope(self, node: cst.CSTNode) -> Scope | None:
+        return self.get_metadata(ScopeProvider, node, None)
+
+    def visit_symbol(self, node: SymbolT) -> bool:
         code_range = self.get_metadata(PositionProvider, node, None)
         if self._is_in_block(code_range):
             self._code_range = code_range
@@ -147,13 +180,12 @@ class RemoveSymbolAtLocation(cst.CSTTransformer):
                     self.symbol_requirements.update(
                         self._node_requirements(parent_scope, scope)
                     )
-            return False
         return True
 
-    def visit_FunctionDef(self, node: cst.FunctionDef) -> bool | None:
+    def visit_FunctionDef(self, node: cst.FunctionDef) -> bool:
         return self.visit_symbol(node)
 
-    def visit_ClassDef(self, node: cst.ClassDef) -> bool | None:
+    def visit_ClassDef(self, node: cst.ClassDef) -> bool:
         return self.visit_symbol(node)
 
     def visit_SimpleStatementLine(
@@ -187,25 +219,44 @@ class RemoveSymbolAtLocation(cst.CSTTransformer):
             self.symbol_name = symbol_name
         return True
 
-    def look_for_inline_referent(self, node: cst.Attribute | cst.Name) -> bool:
+    def look_for_inline_referent(
+        self,
+        node: cst.Attribute
+        | cst.Name
+        | cst.SimpleString
+        | cst.ConcatenatedString,
+    ) -> bool:
         if self._code_range is None:
             return True
 
-        for scope in self._scopes:
-            if scope is None or not isinstance(scope, GlobalScope):
-                continue
-            self.symbol_requirements.update(
-                self._node_requirements(scope, scope, node)
-            )
+        scope = self._get_scope(node)
+        if scope is None:
+            return True
+
+        requirements = self._node_requirements(scope, scope, node)
+        self.symbol_requirements.update(requirements)
         return True
 
-    def visit_Attribute(self, node: cst.Attribute) -> bool | None:
+    def visit_Attribute(self, node: cst.Attribute) -> bool:
         return self.look_for_inline_referent(node)
 
-    def visit_Name(self, node: cst.Name) -> bool | None:
+    def visit_Name(self, node: cst.Name) -> bool:
         if node.value == self.symbol_name:
-            return False
+            return True
         return self.look_for_inline_referent(node)
+
+    def visit_Annotation(self, node: cst.Annotation) -> bool:
+        value = None
+        if isinstance(node.annotation, cst.SimpleString):
+            value = node.annotation.value
+        elif isinstance(node.annotation, cst.ConcatenatedString):
+            value = node.annotation.evaluated_value
+        else:
+            return True
+
+        if value == self.symbol_name:
+            return True
+        return self.look_for_inline_referent(node.annotation)
 
     def leave_symbol(
         self,
@@ -250,22 +301,12 @@ class RemoveSymbolAtLocation(cst.CSTTransformer):
     ):
         return self.leave_symbol(original_node, updated_node)
 
-    @staticmethod
-    def _remove_leading_lines(
-        node: cst.SimpleStatementLine | cst.BaseCompoundStatement,
-    ) -> cst.SimpleStatementLine | cst.BaseCompoundStatement:
-        leading_lines = []
-        for line in node.leading_lines:
-            if line.comment is not None:
-                leading_lines.append(line)
-        return node.with_changes(leading_lines=leading_lines)
-
     def leave_Module(
         self, _: cst.Module, updated_node: cst.Module
     ) -> cst.Module:
         new_body = list(updated_node.body)
         if len(updated_node.body):
-            new_body[0] = self._remove_leading_lines(new_body[0])
+            new_body[0] = remove_leading_lines(new_body[0])
         return updated_node.with_changes(body=new_body)
 
 

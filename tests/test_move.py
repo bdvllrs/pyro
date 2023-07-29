@@ -757,16 +757,18 @@ def test_move_symbol_with_external_dependency_variable_annotation():
 
     mod1 = code(
         """
+        from typing import List
+
         from mod import fn
 
-        test: int = fn(1)
+        test: List = fn(1)
     """
     )
 
     project.create_module("mod1", mod1)
     project.create_module("mod2", "")
 
-    move(project, "mod1", 3, 1, "mod2")
+    move(project, "mod1", 5, 1, "mod2")
 
     assert project.get_module_content("mod1") == "\n"
     assert project.get_module_content("mod2") == mod1
@@ -1103,22 +1105,24 @@ def test_type_requirements():
         from typing import List
 
 
-        def test(x: List[str]):
-            return len(x)
+        class Test:
+            def test(self, x: List[str]):
+                return 1
     """
     )
 
     project.create_module("mod1", mod1)
     project.create_module("mod2", "")
 
-    move(project, "mod1", 5, 5, "mod2")
+    move(project, "mod1", 4, 5, "mod2")
     mod2_expected = code(
         """
         from typing import List
 
 
-        def test(x: List[str]):
-            return len(x)
+        class Test:
+            def test(self, x: List[str]):
+                return 1
     """
     )
 
@@ -1144,17 +1148,17 @@ def test_type_local_requirements():
     project.create_module("mod1", mod1)
     project.create_module("mod2", "")
 
-    move(project, "mod1", 5, 5, "mod2")
+    move(project, "mod1", 6, 5, "mod2")
     mod1_expected = code(
         """
-        from typing import List, TypeVar
+        from typing import TypeVar
 
         T = TypeVar("T")
     """
     )
     mod2_expected = code(
         """
-        from typing import TypeVar
+        from typing import List
 
         from mod1 import T
 
@@ -1165,4 +1169,78 @@ def test_type_local_requirements():
     )
 
     assert project.get_module_content("mod1") == mod1_expected
+    assert project.get_module_content("mod2") == mod2_expected
+
+
+def test_type_local_requirements_string():
+    project = get_temp_project()
+
+    mod1 = code(
+        """
+        from typing import List, TypeVar
+
+        T = TypeVar("T")
+
+
+        def test(x: "List[T]") -> T:
+            return x[0]
+    """
+    )
+
+    project.create_module("mod1", mod1)
+    project.create_module("mod2", "")
+
+    with pytest.raises(ValueError):
+        move(project, "mod1", 6, 5, "mod2")
+    # mod1_expected = code(
+    #     """
+    #     from typing import TypeVar
+    #
+    #     T = TypeVar("T")
+    # """
+    # )
+    # mod2_expected = code(
+    #     """
+    #     from typing import List
+    #
+    #     from mod1 import T
+    #
+    #
+    #     def test(x: "List[T]") -> T:
+    #         return x[0]
+    # """
+    # )
+    #
+    # assert project.get_module_content("mod1") == mod1_expected
+    # assert project.get_module_content("mod2") == mod2_expected
+
+
+def test_type_local_param_has_requirements():
+    project = get_temp_project()
+
+    mod1 = code(
+        """
+        import math
+
+
+        def test(x=math.pi):
+            return x
+    """
+    )
+
+    project.create_module("mod1", mod1)
+    project.create_module("mod2", "")
+
+    move(project, "mod1", 4, 5, "mod2")
+    mod2_expected = code(
+        """
+        import math
+
+
+        def test(x=math.pi):
+            return x
+    """
+    )
+
+    assert project.get_module_content("mod1") == "\n"
     assert project.get_module_content("mod2") == mod2_expected
