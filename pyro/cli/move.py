@@ -1,4 +1,5 @@
 import json
+import traceback
 from pathlib import Path
 
 import click
@@ -40,6 +41,11 @@ def move_command(
         project = Project(root_path)
         outputs = move(project, module_start, lineno, colno, module_end)
     except Exception as e:
-        print(json.dumps({"success": False, "errorMsg": str(e)}))
+        err_trace = traceback.format_exc()
+        print(
+            json.dumps(
+                {"success": False, "errorMsg": str(e), "trace": err_trace}
+            )
+        )
         return
     print(json.dumps(outputs))
