@@ -1,5 +1,5 @@
 import pytest
-from utils import get_temp_project, code
+from utils import code, get_temp_project
 
 from pyro.refactorings import move
 
@@ -1089,6 +1089,104 @@ def test_move_symbol_with_init_file():
         from mod2 import test
 
         __all__ = ["fn", "test"]
+    """
+    )
+
+    assert project.get_module_content("mod1") == mod1_expected
+    assert project.get_module_content("mod2") == mod2_expected
+    assert project.get_module_content("__init__") == init_expected
+
+
+def test_move_symbol_with_init_file_2():
+    project = get_temp_project()
+
+    mod1 = code(
+        """
+        def test():
+            return 1
+    """
+    )
+
+    init_file = code(
+        """
+        from mod import fn
+        from mod1 import test
+
+        __all__ = ["test", "fn"]
+    """
+    )
+
+    project.create_module("mod1", mod1)
+    project.create_module("mod2", "")
+    project.create_module("__init__", init_file)
+
+    move(project, "mod1", 1, 5, "mod2")
+    mod2_expected = code(
+        """
+        def test():
+            return 1
+    """
+    )
+    init_expected = code(
+        """
+        from mod import fn
+        from mod2 import test
+
+        __all__ = ["test", "fn"]
+    """
+    )
+
+    assert project.get_module_content("mod1") == "\n"
+    assert project.get_module_content("mod2") == mod2_expected
+    assert project.get_module_content("__init__") == init_expected
+
+
+def test_move_symbol_with_init_file_3():
+    project = get_temp_project()
+
+    mod1 = code(
+        """
+        def test():
+            return 1
+
+
+        def fn():
+            return 2
+    """
+    )
+
+    init_file = code(
+        """
+        from mod import fn2
+        from mod1 import fn
+
+        __all__ = ["fn", "fn2"]
+    """
+    )
+
+    project.create_module("mod1", mod1)
+    project.create_module("mod2", "")
+    project.create_module("__init__", init_file)
+
+    move(project, "mod1", 1, 5, "mod2")
+    mod1_expected = code(
+        """
+        def fn():
+            return 2
+    """
+    )
+    mod2_expected = code(
+        """
+        def test():
+            return 1
+    """
+    )
+    init_expected = code(
+        """
+        from mod import fn2
+        from mod1 import fn
+
+        __all__ = ["fn", "fn2"]
     """
     )
 

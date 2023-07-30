@@ -324,10 +324,10 @@ class ReplaceImport(cst.CSTTransformer):
                             else:
                                 other_assignments = True
 
-                    if assignment_node is not None:
-                        continue
-
                     for export in self._mod_exports:
+                        if assignment.name != export:
+                            continue
+
                         if is_import_of_module(
                             [self._from[0]],
                             list(self._from[1:]),
@@ -409,6 +409,8 @@ class ReplaceImport(cst.CSTTransformer):
             new_names.append(
                 name.with_changes(comma=cst.MaybeSentinel.DEFAULT)
             )
+        if not len(new_names):
+            raise ValueError(f"{other_assignments} -- {names}")
 
         return [updated_node.with_changes(names=new_names), new_import]
 
