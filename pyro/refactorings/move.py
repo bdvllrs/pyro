@@ -102,9 +102,9 @@ class RemoveSymbolAtLocation(cst.CSTTransformer):
     def _get_parent_annotation(
         self, node: cst.CSTNode
     ) -> cst.Annotation | None:
-        ref_parent = cst.ensure_type(
-            self.get_metadata(ParentNodeProvider, node), cst.CSTNode
-        )
+        ref_parent = self.get_metadata(ParentNodeProvider, node)
+        assert isinstance(ref_parent, cst.CSTNode)
+
         if isinstance(ref_parent, cst.Module):
             return None
         if isinstance(ref_parent, cst.Annotation):
@@ -453,7 +453,9 @@ def move(
 
             modules_to_save.append((module_name, module))
 
+    edited_files: list[dict[str, Any]] = []
     for module_name, mod in modules_to_save:
         project.save_module(module_name, mod)
+        edited_files.append({"filename": module_name, "location": 0})
 
-    return {"success": True}
+    return {"success": True, "editedFiles": edited_files}

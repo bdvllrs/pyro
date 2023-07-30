@@ -118,6 +118,7 @@ class RemoveUnusedImports(cst.CSTTransformer):
         names_to_keep = []
 
         names = updated_node.names
+
         if isinstance(names, cst.ImportStar):
             return updated_node
 
