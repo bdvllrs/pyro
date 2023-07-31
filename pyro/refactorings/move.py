@@ -19,7 +19,6 @@ from pyro.project import Project
 from pyro.refactorings.imports import (
     AddImports,
     GatherExportsVisitor,
-    ImportT,
     RemoveUnusedImports,
     ReplaceImport,
     get_import,
@@ -456,6 +455,8 @@ def move(
     edited_files: list[dict[str, Any]] = []
     for module_name, mod in modules_to_save:
         project.save_module(module_name, mod)
-        edited_files.append({"filename": module_name, "location": 0})
+        edited_files.append(
+            {"filename": f"{module_name.replace('.', '/')}.py", "location": 0}
+        )
 
     return {"success": True, "editedFiles": edited_files}
