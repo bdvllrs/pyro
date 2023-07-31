@@ -19,6 +19,7 @@ from pyro.project import Project
 from pyro.refactorings.imports import (
     AddImports,
     GatherExportsVisitor,
+    ImportT,
     RemoveUnusedImports,
     ReplaceImport,
     get_import,
